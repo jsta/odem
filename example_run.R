@@ -112,8 +112,9 @@ for (lake.id in lake.list){
   dummyinput$k600t[which(inyr$airtemp <= 0 & inyr$temperature_total <= 4)] = 1e-5
   dummyinput$volume_epi = ifelse(dummyinput$stratified == 0, dummyinput$volume_tot, dummyinput$volume_epi)
   dummyinput$volume_hyp = ifelse(dummyinput$stratified == 0, dummyinput$volume_tot, dummyinput$volume_hyp)
-  dummyinput$volchange_epi = c(diff(inyr$volume_epi), 0)/inyr$volume_epi
-  dummyinput$volchange_hypo = c(diff(inyr$volume_hypo), 0)/inyr$volume_hypo
+  dummyinput$volchange_epi = c(0,diff(inyr$volume_epi))#/inyr$volume_epi
+  dummyinput$volchange_hypo = c(0,diff(inyr$volume_hypo))#/inyr$volume_hypo
+  dummyinput$max_depth = rep(25, nrow(inyr))
   
   ic_cond <- data.frame(    DO_epi_init = 15 * 1000 * dummyinput$volume_tot[1], 
                             DO_hyp_init = 15 * 1000 * dummyinput$volume_tot[1],
@@ -143,33 +144,25 @@ for (lake.id in lake.list){
   shiftdays <- approxfun(x = times, y = dummyinput$shiftdays, method = "linear", rule = 2) 
   volchange_epi <- approxfun(x = times, y = dummyinput$volchange_epi, method = "linear", rule = 2) 
   volchange_hypo <- approxfun(x = times, y = dummyinput$volchange_hypo, method = "linear", rule = 2) 
+  max_depth <- approxfun(x = times, y = dummyinput$max_depth, method = "linear", rule = 2) 
   
   run_odem <- function(t, y, parms){
     
     NEP = params[1]
-    MIN = params[2]
-    SED1 = params[3]
-    SED2 = params[4]
+    SED = params[2]
     
     fNEP = 0
-    fSED2 = 0
+    fSED = 0
     fATM =  0
-    fMIN = 0
     fENTR1 = 0
     fENTR2 = 0
-    fSED1 = 0
     
     if (floor(stratified(t)) == 0) {
       
-      if (y[1] <= 0){
-        atm_do = o2satt(t) 
-      } else {
-        atm_do = (o2sat(t) - y[1]/volume_tot(t))
-      }
       
       dDOdt_tot = ( NEP * theta0(t) - 
-        SED2 *  (y[1]/(khalf(t) + y[1])) * theta0(t) * area_epi(t)/volume_tot(t) +
-        k600t(t)  *  atm_do  * area_epi(t)/volume_tot(t) )  * volume_tot(t)
+        SED *  (y[1]/(khalf(t) + y[1])) * theta0(t) / (volume_tot(t)/area_epi(t)) +
+        k600t(t)  *  (o2sat(t) - max(y[1]/volume_tot(t),0.01))  / (volume_tot(t)/area_epi(t))  )  * volume_tot(t)
       
       if(abs(dDOdt_tot)>abs(y[1])){
         if(dDOdt_tot < 0){
@@ -185,32 +178,13 @@ for (lake.id in lake.list){
       flux_hypo = flux_tot
       
       fNEP = NEP * theta0(t)
-      fSED2 = - SED2 *  (y[1]/(khalf(t) + y[1])) * theta0(t) * area_epi(t)/volume_tot(t)
-      fATM =  k600t(t)  *  atm_do  * area_epi(t)/volume_tot(t)
-      fMIN = 0
+      fSED = -  SED *  (y[1]/(khalf(t) + y[1])) * theta0(t) / (volume_tot(t)/area_epi(t))
+      fATM =  k600t(t)  *  (o2sat(t) - max(y[1]/volume_tot(t),0.01))  / (volume_tot(t)/area_epi(t)) 
       fENTR1 = 0
       fENTR2 = 0
-      fSED1 = 0
       
     } else if (stratified(t) == 1){
       
-      # if(shiftdays(t) == 1){
-      #   delvol_epi = 0
-      #   delvol_hypo = 0
-      #   # flux_tot = 0
-      #   # flux_epi = 0
-      #   # flux_hypo = 0
-      #   # fNEP = 0
-      #   # fSED2 = 0
-      #   # fATM =  0
-      #   # fMIN = 0
-      #   # fENTR1 = 0
-      #   # fENTR2 = 0
-      #   # fSED1 = 0
-      # } else {
-      #   delvol_epi = volchange_epi(t)
-      #   delvol_hypo = volchange_hypo(t)
-      # }
       delvol_epi = volchange_epi(t)
       delvol_hypo = volchange_hypo(t)
       
@@ -220,11 +194,11 @@ for (lake.id in lake.list){
         x_do1 = y[2] / volume_epi(t)
       }
       
-      if (delvol_hypo >= 0){
-        x_do2 = y[2] / volume_epi(t)
-      } else {
-        x_do2 = y[3] / volume_hyp(t)
-      }
+      # if (delvol_hypo >= 0){
+      #   x_do2 = y[2] / volume_epi(t)
+      # } else {
+      #   x_do2 = y[3] / volume_hyp(t)
+      # }
       
       if (y[2] <= 0){
         atm_do = o2sat(t) 
@@ -232,13 +206,9 @@ for (lake.id in lake.list){
         atm_do = (o2sat(t) - y[2]/volume_epi(t))
       }
       
-      # dDOdt_epi= ( NEP *theta1(t) -
-      #   SED1 *  (y[2]/(khalf(t) + y[2])) * theta1(t) * area_epi(t)/volume_epi(t) +
-      #   k600(t) *  (o2sat(t) - y[2]/volume_epi(t)) * area_epi(t)/volume_epi(t) +
-      #   delvol_epi* x_do1 ) * volume_epi(t)
-        dDOdt_epi= ( NEP *theta1(t) -
-                       SED1 *  (y[2]/(khalf(t) + y[2])) * theta1(t) * area_epi(t)/volume_epi(t) +
-                       k600(t) *  atm_do * area_epi(t)/volume_epi(t) ) * volume_epi(t)
+      dDOdt_epi= ( NEP *theta1(t) -
+        k600(t) *  (o2sat(t) - max(y[2]/volume_epi(t),0.01)) / tddepth(t) ) * volume_epi(t) +
+        delvol_epi* x_do1 
     
     if(abs(dDOdt_epi)>abs(y[2])){
       if(dDOdt_epi < 0){
@@ -249,11 +219,8 @@ for (lake.id in lake.list){
     }else{
       flux_epi = dDOdt_epi 
     }
-      # dDOdt_hyp =  ( - MIN  * theta2(t) -
-      # SED2*  (y[3]/(khalf(t) + y[3])) * theta2(t) * area_hyp(t)/volume_hyp(t) +
-      #   delvol_hypo * x_do2 )* volume_hyp(t)
-        dDOdt_hyp =  ( - MIN  * theta2(t) -
-                         SED2*  (y[3]/(khalf(t) + y[3])) * theta2(t) * area_hyp(t)/volume_hyp(t))* volume_hyp(t)
+      dDOdt_hyp =  ( - SED*  (y[3]/(khalf(t) + y[3])) * theta2(t) / (max_depth(t) - tddepth(t)) ) * volume_hyp(t) -
+        (delvol_epi * x_do1 )
     
     if(abs(dDOdt_hyp)>abs(y[3])){
       if(dDOdt_hyp < 0){
@@ -268,23 +235,23 @@ for (lake.id in lake.list){
     flux_tot = (flux_epi / volume_epi(t) + flux_hypo / volume_hyp(t)) * volume_tot(t)
     
     fNEP = NEP *theta1(t)
-    fSED2 = - SED2*  (y[3]/(khalf(t) + y[3])) * theta2(t) * area_hyp(t)/volume_hyp(t) 
-    fATM =  k600(t) *  atm_do * area_epi(t)/volume_epi(t) 
-    fMIN =  - MIN  * theta2(t) 
-    fENTR1 = delvol_epi* x_do1
-    fENTR2 =  delvol_hypo * x_do2 
-    fSED1 = SED1 *  (y[2]/(khalf(t) + y[2])) * theta1(t) * area_epi(t)/volume_epi(t) 
+    fSED = - SED*  (y[3]/(khalf(t) + y[3])) * theta2(t)  / (max_depth(t) - tddepth(t))
+    fATM =  k600(t) *  (o2sat(t) - max(y[2]/volume_epi(t),0.01)) / tddepth(t)
+    fENTR1 = delvol_epi* x_do1 / volume_epi(t)
+    fENTR2 =  - delvol_epi * x_do1 / volume_hypo(t)
+  
     
     }
-    write.table(matrix(c(fNEP, fMIN, fSED1, fSED2, fATM, fENTR1, fENTR2,
+    write.table(matrix(c(fNEP, fSED, fATM, fENTR1, fENTR2,
                          flux_tot, flux_epi, flux_hypo, t), nrow=1), '/Users/robertladwig/Documents/DSI/odem/output.txt', append = TRUE,
                 quote = FALSE, row.names = FALSE, col.names = FALSE)
     return(list(c(flux_tot, flux_epi, flux_hypo)))
   }
 
-  params <- c(300, 100, 100, 2500)
+  params <- c(0.1, 0.1)#c(300, 2500)
   
   file.remove('/Users/robertladwig/Documents/DSI/odem/output.txt')
+  
   out <- deSolve::ode(times = seq(1, nrow(dummyinput), by = 1), y = as.numeric(ic_cond), func = run_odem, parms = params,
              method = "rk4")
   
@@ -301,10 +268,10 @@ for (lake.id in lake.list){
   plot(out[,3]/vol_epi)
   
   output <- read.table('/Users/robertladwig/Documents/DSI/odem/output.txt')
-  output <- data.frame('fNEP' = output[,1], 'fMIN' = output[,2], 'fSED1' = output[,3],
-                       'fSED2' = output[,4], 'fATM' = output[,5], 'fENTR1' = output[,6],
-                       'fENTR2' = output[,7], 'flux_tot'= output[,8], 'flux_epi'= output[,9], 
-                       'flux_hypo'= output[,10], 'timestep' = output[,11])
+  output <- data.frame('fNEP' = output[,1], 
+                       'fSED' = output[,2], 'fATM' = output[,3], 'fENTR1' = output[,4],
+                       'fENTR2' = output[,5], 'flux_tot'= output[,6], 'flux_epi'= output[,7], 
+                       'flux_hypo'= output[,8], 'timestep' = output[,9])
   
   ggplot(output) +
     geom_line(aes(timestep, fATM)) +
