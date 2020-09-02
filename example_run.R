@@ -238,7 +238,7 @@ for (lake.id in lake.list){
     fSED = - SED*  (y[3]/(khalf(t) + y[3])) * theta2(t)  / (max_depth(t) - tddepth(t))
     fATM =  k600(t) *  (o2sat(t) - max(y[2]/volume_epi(t),0.01)) / tddepth(t)
     fENTR1 = delvol_epi* x_do1 / volume_epi(t)
-    fENTR2 =  - delvol_epi * x_do1 / volume_hypo(t)
+    fENTR2 =  - delvol_epi * x_do1 / volume_hyp(t)
   
     
     }
