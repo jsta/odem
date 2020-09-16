@@ -338,7 +338,7 @@ lake.id = lake.list[5]
     geom_point(aes(time, total_mass, col = 'total')) +
     geom_point(aes(time, epi_mass, col = 'epi')) +
     geom_point(aes(time, hypo_mass, col = 'hypo')) +
-    xlim(0,100) +
+    # xlim(0,100) +
     ylab('Mass in mg')
   ggplot(output)+
     geom_point(aes(time, total_vol, col = 'total')) +
