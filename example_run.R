@@ -9,11 +9,13 @@ library(ggdark)
 library(deSolve)
 library(reshape2)
 library(raster)
+library(zoo)
 
 lake.list <- c('Allequash', 'BigMuskellunge', 'Crystal', 'Fish', 'Mendota',
                'Monona', 'Sparkling', 'Trout', 'Wingra')
 
-for (lake.id in lake.list){
+# for (lake.id in lake.list){
+lake.id = lake.list[5]
   setwd(paste0(lake.id))
   years <- 1979:2019
   
@@ -24,11 +26,21 @@ for (lake.id in lake.list){
                 'temperature_hypo', 'temperature_total', 'volume_total',
                 'volume_epi', 'volume_hypo', 'area_thermocline',
                 'area_surface', 'upper_meta', 'lower_meta',
-                'year', 'day_of_year', 'wind','airtemp'),
+                'year', 'day_of_year', 'z.max', 'wind','airtemp'),
     col_types=cols(datetime=col_datetime(), year=col_integer(), day_of_year=col_integer(), .default=col_double()))
   inyr <- filter(input, year %in% years)
 
-  library(zoo)
+
+  # obs <- read.table(
+  #   paste0('observed.txt'),
+  #   header=FALSE,
+  #   sep=' ',
+  #   as.is=TRUE) %>%
+  #   t() %>%
+  #   as_tibble(.name_repair='minimal') %>%
+  #   setNames(., nm=c('dateint', 'DO_tot', 'DO_epi', 'DO_hypo')) %>%
+  #   mutate(date = zoo::as.Date(dateint, origin='1979-04-01')) %>% # just guessing at origin and therefore at dates
+  #   select(date, everything())
   obs <- read.table(
     paste0('observed.txt'),
     header=FALSE,
@@ -37,8 +49,7 @@ for (lake.id in lake.list){
     t() %>%
     as_tibble(.name_repair='minimal') %>%
     setNames(., nm=c('dateint', 'DO_tot', 'DO_epi', 'DO_hypo')) %>%
-    mutate(date = zoo::as.Date(dateint, origin='1979-04-01')) %>% # just guessing at origin and therefore at dates
-    select(date, everything())
+    mutate(date = zoo::as.Date(dateint, origin='1979-04-01')) 
   obsyr <- filter(obs, lubridate::year(date) %in% years)
 
   
@@ -159,10 +170,13 @@ for (lake.id in lake.list){
   o2satt <- approxfun(x = times, y = dummyinput$o2satt, method = "linear", rule = 2) 
   k600 <- approxfun(x = times, y = dummyinput$k600, method = "linear", rule = 2) 
   o2sat <- approxfun(x = times, y = dummyinput$o2sat, method = "linear", rule = 2) 
-  volume_epi <- approxfun(x = times, y = dummyinput$volume_epi, method = "linear", rule = 2) 
-  volume_tot <- approxfun(x = times, y = dummyinput$volume_tot, method = "linear", rule = 2) 
+  # volume_epi <- approxfun(x = times, y = dummyinput$volume_epi, method = "linear", rule = 2) 
+  # volume_tot <- approxfun(x = times, y = dummyinput$volume_tot, method = "linear", rule = 2) 
+  # volume_hyp <- approxfun(x = times, y = dummyinput$volume_hyp, method = "linear", rule = 2) 
+  volume_epi <- approxfun(x = times, y = inyr$volume_epi, method = "linear", rule = 2) 
+  volume_tot <- approxfun(x = times, y = inyr$volume_total, method = "linear", rule = 2) 
+  volume_hyp <- approxfun(x = times, y = inyr$volume_hypo, method = "linear", rule = 2) 
   area_epi <- approxfun(x = times, y = dummyinput$area_epi, method = "linear", rule = 2) 
-  volume_hyp <- approxfun(x = times, y = dummyinput$volume_hyp, method = "linear", rule = 2) 
   area_hyp <- approxfun(x = times, y = dummyinput$area_hyp, method = "linear", rule = 2) 
   tddepth <- approxfun(x = times, y = dummyinput$tddepth, method = "linear", rule = 2) 
   wtr_epi <- approxfun(x = times, y = dummyinput$wtr_epi, method = "linear", rule = 2) 
@@ -216,9 +230,7 @@ for (lake.id in lake.list){
 
       
     } else if (stratified(t) == 1){
-      
-      delvol_epi = volchange_epi(t)
-      delvol_hypo = volchange_hypo(t)
+    
       
       if (volchange(t) >= 0){
         x_do1 = y[3] 
@@ -239,10 +251,10 @@ for (lake.id in lake.list){
       }
       
       fNEP = NEP *theta1(t)
-      fSED = - SED*  (y[3]/(khalf(t) + y[3])) * theta2(t)  / (max_depth(t) - tddepth(t))
+      fSED = - SED*  (y[3]/(khalf(t) + y[3])) * theta2(t)  / max(volume_hyp(t)/area_hyp(t),1)#(max_depth(t) - tddepth(t))
       fATM =  k600(t) *  (o2sat(t) - max(y[2]/volume_epi(t),0.01)) / tddepth(t)
       fENTR1 = volchange(t) * x_do1 / volume_epi(t)
-      fENTR2 =   volchange(t) * x_do1 / volume_hyp(t)
+      fENTR2 =  - volchange(t) * x_do1 / volume_hyp(t)
       
       dDOdt_epi= fNEP-
         fATM +
@@ -257,7 +269,7 @@ for (lake.id in lake.list){
     }else{
       flux_epi = dDOdt_epi 
     }
-      dDOdt_hyp =  fSED -
+      dDOdt_hyp =  fSED +
         fENTR2
     
     if(abs(dDOdt_hyp)>abs(y[3])){
@@ -270,8 +282,8 @@ for (lake.id in lake.list){
       flux_hypo = dDOdt_hyp 
     }
     
-    flux_tot = (flux_epi / volume_epi(t) + flux_hypo / volume_hyp(t))/2 * volume_tot(t)
-    
+    # flux_tot = (flux_epi / volume_epi(t) + flux_hypo / volume_hyp(t))/2 * volume_tot(t)
+    flux_tot = (flux_epi + flux_hypo )/2 
 
   
     
@@ -292,19 +304,47 @@ for (lake.id in lake.list){
   vol_tot = dummyinput$volume_tot*1000
   vol_epi = dummyinput$volume_epi*1000
   vol_hypo = dummyinput$volume_hyp*1000
-  
+  # vol_tot = inyr$volume_total*1000
+  # vol_epi = inyr$volume_epi*1000
+  # vol_hypo = inyr$volume_hypo*1000
+  # 
   t = 100
   plot(out[1:t,1], out[1:t,2]/(vol_tot[1:t]))
   plot(out[1:t,1], out[1:t,3]/(vol_epi[1:t]))
   plot(out[1:t,1], out[1:t,4]/(vol_hypo[1:t]))
   
+  plot(out[1:t,1], out[1:t,2])
+  plot(out[1:t,1], out[1:t,3])
+  plot(out[1:t,1], out[1:t,4])
+  
   output = data.frame('time' = out[,1],
-                      'total' = out[,2]/vol_tot,
-                      'epi' = out[,3]/vol_epi,
-                      'hypo' = out[,4]/vol_hypo)
+                      'total_conc' = out[,2]/vol_tot,
+                      'epi_conc' = out[,3]/vol_epi,
+                      'hypo_conc' = out[,4]/vol_hypo,
+                      'total_mass' = out[,2],
+                      'epi_mass' = out[,3],
+                      'hypo_mass' = out[,4],
+                      'total_vol' = vol_tot,
+                      'epi_vol' = vol_epi,
+                      'hypo_vol' = vol_hypo)
   ggplot(output)+
-  geom_point(aes(time, epi, col = 'epi')) +
-  geom_point(aes(time, hypo, col = 'hypo'))
+  geom_point(aes(time, total_conc, col = 'total')) +
+  geom_point(aes(time, epi_conc, col = 'epi')) +
+  geom_point(aes(time, hypo_conc, col = 'hypo')) +
+    ylim(0,500) +
+    xlim(0,50) +
+    ylab('Conc in mg/m3')
+  ggplot(output)+
+    geom_point(aes(time, total_mass, col = 'total')) +
+    geom_point(aes(time, epi_mass, col = 'epi')) +
+    geom_point(aes(time, hypo_mass, col = 'hypo')) +
+    xlim(0,100) +
+    ylab('Mass in mg')
+  ggplot(output)+
+    geom_point(aes(time, total_vol, col = 'total')) +
+    geom_point(aes(time, epi_vol, col = 'epi')) +
+    geom_point(aes(time, hypo_vol, col = 'hypo')) +
+    ylab('Volume in m3')
   
   
   output <- read.table('/Users/robertladwig/Documents/DSI/odem/output.txt')
@@ -330,4 +370,4 @@ for (lake.id in lake.list){
     geom_point() +
     facet_wrap(~ variable, scales = 'free')
   
-}
+# }
